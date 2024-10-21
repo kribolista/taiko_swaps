@@ -42,6 +42,10 @@ const WETH_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
 ];
 
+// Set GWEI value (in GWEI) and convert to Wei
+let gasPriceGwei = process.env.GAS_PRICE || "0.075"; // Default to 0.075 GWEI
+const gasPrice = ethers.parseUnits(gasPriceGwei, "gwei");
+
 function getRandomPercentage(min, max) {
   return Math.random() * (max - min) + min;
 }
@@ -96,7 +100,7 @@ async function getCombinedBalanceInUSDT(walletAddress, ethPrice) {
 
 async function wrapETH(contract, amount) {
   try {
-    const tx = await contract.deposit({ value: amount });
+    const tx = await contract.deposit({ value: amount, gasPrice: gasPrice });
     await tx.wait();
   } catch (error) {
     console.error(`Error wrapping ETH: ${error.message}`);
@@ -106,7 +110,7 @@ async function wrapETH(contract, amount) {
 
 async function unwrapETH(contract, amount) {
   try {
-    const tx = await contract.withdraw(amount);
+    const tx = await contract.withdraw(amount, { gasPrice: gasPrice });
     await tx.wait();
   } catch (error) {
     console.error(`Error unwrapping ETH: ${error.message}`);
