@@ -42,16 +42,14 @@ const WETH_ABI = [
   "function balanceOf(address owner) view returns (uint256)",
 ];
 
-// Set GWEI value (in GWEI) and convert to Wei
-let gasPriceGwei = process.env.GAS_PRICE || "0.075"; // Default to 0.075 GWEI
-const gasPrice = ethers.parseUnits(gasPriceGwei, "gwei");
+// Fetch Gwei and iteration count from .env
+const GWEI = process.env.GWEI;
+const ITERATIONS = parseInt(process.env.ITERATIONS);
+
+const gasPrice = ethers.utils.parseUnits(GWEI, "gwei");
 
 function getRandomPercentage(min, max) {
   return Math.random() * (max - min) + min;
-}
-
-function getRandomDelay(min, max) {
-  return Math.floor(Math.random() * (max - min + 1) + min) * 1000;
 }
 
 async function getBalance(contract, address) {
@@ -61,41 +59,6 @@ async function getBalance(contract, address) {
     console.error(`Error getting balance: ${error.message}`);
     throw error;
   }
-}
-
-async function getETHPriceInUSDT() {
-  try {
-    const response = await axios.get(
-      "https://api.coingecko.com/api/v3/simple/price",
-      {
-        params: {
-          ids: "ethereum",
-          vs_currencies: "usd",
-        },
-      }
-    );
-
-    const ethPriceInUSD = response.data.ethereum.usd;
-    return ethPriceInUSD;
-  } catch (error) {
-    console.error(`Error fetching ETH price: ${error.message}`);
-    throw error;
-  }
-}
-
-async function getCombinedBalanceInUSDT(walletAddress, ethPrice) {
-  const wethContract = new ethers.Contract(WETH_ADDRESS, WETH_ABI, provider);
-  const [ethBalance, wethBalance] = await Promise.all([
-    provider.getBalance(walletAddress),
-    getBalance(wethContract, walletAddress),
-  ]);
-
-  const ethBalanceFormatted = ethers.formatEther(ethBalance);
-  const wethBalanceFormatted = ethers.formatEther(wethBalance);
-  const totalEth =
-    parseFloat(ethBalanceFormatted) + parseFloat(wethBalanceFormatted);
-
-  return totalEth * ethPrice;
 }
 
 async function wrapETH(contract, amount) {
@@ -118,7 +81,7 @@ async function unwrapETH(contract, amount) {
   }
 }
 
-async function performWrapsAndUnwraps(wallet) {
+async function performWrapAndUnwrap(wallet) {
   const walletInstance = new ethers.Wallet(wallet.privateKey, provider);
   const wethContract = new ethers.Contract(
     WETH_ADDRESS,
@@ -127,80 +90,40 @@ async function performWrapsAndUnwraps(wallet) {
   );
 
   try {
-    const [ethBalance, wethBalance] = await Promise.all([
-      provider.getBalance(wallet.address),
-      getBalance(wethContract, wallet.address),
-    ]);
+    // Fetch ETH balance
+    const ethBalance = await provider.getBalance(wallet.address);
 
-    await performOperations(wrapETH.bind(null, wethContract), ethBalance, 3, 6);
-    await performOperations(
-      unwrapETH.bind(null, wethContract),
-      wethBalance,
-      3,
-      6
-    );
+    // Generate random amount (between 8% and 12% of the ETH balance) to wrap
+    const percentage = getRandomPercentage(0.08, 0.12);
+    const randomAmount = (BigInt(ethBalance) * BigInt(Math.floor(percentage * 1e18))) / BigInt(1e18);
+
+    // Perform wrap with random amount
+    await wrapETH(wethContract, randomAmount);
+
+    // Fetch WETH balance after wrap
+    const wethBalance = await getBalance(wethContract, wallet.address);
+
+    // Perform unwrap for the entire WETH balance
+    await unwrapETH(wethContract, wethBalance);
+
   } catch (error) {
     console.error(
-      `Error in main function for ${wallet.address}: ${error.message}`
+      `Error in performWrapAndUnwrap for ${wallet.address}: ${error.message}`
     );
-  }
-}
-
-async function performOperations(operation, balance, minTimes, maxTimes) {
-  const times =
-    Math.floor(Math.random() * (maxTimes - minTimes + 1)) + minTimes;
-  for (let i = 0; i < times; i++) {
-    const percentage = getRandomPercentage(0.08, 0.12);
-    const amount =
-      (BigInt(balance) * BigInt(Math.floor(percentage * 1e18))) / BigInt(1e18);
-    await operation(amount);
-    await new Promise((resolve) => setTimeout(resolve, getRandomDelay(2, 6)));
   }
 }
 
 async function main() {
-  const promises = wallets.map((wallet) => performWrapsAndUnwraps(wallet));
+  const promises = wallets.map((wallet) => performWrapAndUnwrap(wallet));
   await Promise.all(promises);
 }
 
-async function runMultipleTimes(times) {
-  const ethPrice = await getETHPriceInUSDT();
-
-  const initialBalances = await Promise.all(
-    wallets.map(async (wallet) => {
-      const balanceInUSDT = await getCombinedBalanceInUSDT(
-        wallet.address,
-        ethPrice
-      );
-      console.log(
-        `Initial balance for ${wallet.address.slice(
-          0,
-          6
-        )}...${wallet.address.slice(-4)}: ${balanceInUSDT.toFixed(2)}$`
-      );
-      return balanceInUSDT;
-    })
-  );
-
-  for (let i = 0; i < times; i++) {
+async function runMultipleTimes() {
+  for (let i = 0; i < ITERATIONS; i++) {
+    console.log(`Starting iteration ${i + 1}...`);
     await main();
+    console.log(`Iteration ${i + 1} complete.\n`);
   }
-
-  const finalBalances = await Promise.all(
-    wallets.map(async (wallet) => {
-      const balanceInUSDT = await getCombinedBalanceInUSDT(
-        wallet.address,
-        ethPrice
-      );
-      console.log(
-        `Final balance for ${wallet.address.slice(
-          0,
-          6
-        )}...${wallet.address.slice(-4)}: ${balanceInUSDT.toFixed(2)}$`
-      );
-      return balanceInUSDT;
-    })
-  );
 }
 
-runMultipleTimes(20);
+runMultipleTimes();
